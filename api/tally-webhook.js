@@ -77,7 +77,7 @@ export default async function handler(req, res) {
 
     const fields = req.body?.data?.fields || [];
 
-    // Tally labels (as in your form)
+    // Labels from your Tally test form
     const fullName       = pickField(fields, 'Full Name').trim();
     const companyName    = pickField(fields, 'Company Name').trim();
     const companyWebsite = pickField(fields, 'Company Website').trim();
@@ -96,7 +96,7 @@ export default async function handler(req, res) {
       'Content-Type': 'application/json',
     };
 
-    // 1) Upsert Company
+    // 1) Upsert or create Company (by domain)
     let companyId = null;
     if (domain) {
       const displayName = companyName || companyNameFromDomain(domain);
@@ -110,18 +110,17 @@ export default async function handler(req, res) {
       if (cResp.ok) companyId = getId(cJson);
     }
 
-    // 2) Upsert-or-Create Person — try multiple accepted shapes
+    // 2) Upsert-or-Create Person — try several shapes for email field
     let personId = null;
 
-    // Try UPSERT by email (several shapes)
     const upsertUrl = 'https://api.attio.com/v2/objects/people/records?matching_attribute=email_addresses';
     const baseName  = [{ first_name: firstName, last_name: lastName }];
     const emailVariants = [
-      { email_addresses: [{ email_address: email }], name: baseName }, // we expect this to work
-      { email_addresses: [{ email: email }],        name: baseName }, // alt
-      { email_addresses: [email],                    name: baseName }, // alt
-      { emails: [{ email }],                         name: baseName }, // alt
-      { emails: [email],                              name: baseName }, // alt
+      { email_addresses: [{ email_address: email }], name: baseName }, // expected
+      { email_addresses: [{ email: email }],        name: baseName },  // alt
+      { email_addresses: [email],                    name: baseName },  // alt
+      { emails: [{ email }],                         name: baseName },  // alt
+      { emails: [email],                              name: baseName },  // alt
     ];
 
     let r = await tryPersonWrite({
@@ -132,7 +131,6 @@ export default async function handler(req, res) {
       logPrefix: '[attio people upsert]',
     });
 
-    // If upsert didn’t work, try CREATE (several shapes)
     if (!r.ok) {
       const createUrl = 'https://api.attio.com/v2/objects/people/records';
       r = await tryPersonWrite({
@@ -140,16 +138,14 @@ export default async function handler(req, res) {
         authHeaders,
         url: createUrl,
         valuesVariants: emailVariants,
-      logPrefix: '[attio people create fallback]',
+        logPrefix: '[attio people create fallback]',
       });
     }
 
-    if (!r.ok) {
-      return res.status(502).json({ error: 'Attio people error (all variants failed)' });
-    }
+    if (!r.ok) return res.status(502).json({ error: 'Attio people error (all variants failed)' });
     personId = r.id || null;
 
-    // 3) Create Deal (prefer linking by IDs)
+    // 3) Create Deal and associate person (and company if we have it)
     const displayCompany = domain ? (companyName || companyNameFromDomain(domain)) : '';
     const dealName = `Inbound — ${fullName || email}${displayCompany ? ' @ ' + displayCompany : ''}`;
 
