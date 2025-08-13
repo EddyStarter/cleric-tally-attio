@@ -1,10 +1,7 @@
-// /api/tally-webhook.js
-// Vercel Node.js serverless function (no framework)
+// /api/tally-webhook.js  (CommonJS for Vercel)
+// Creates/updates Person + Company from Tally; creates a Deal and links them.
 
-// ======= CONFIG YOU GAVE ME =======
 const DEAL_OWNER_USER_ID = 'a8e7af3f-6595-48ff-ab12-d13e9964ee51'; // your Attio user UUID
-// ==================================
-
 const ATTIO_BASE = 'https://api.attio.com/v2';
 const ATTIO_TOKEN = process.env.ATTIO_TOKEN;
 const INITIAL_STAGE_NAME = process.env.ATTIO_INITIAL_STAGE || 'Prospect';
@@ -42,22 +39,18 @@ async function attioFetch(path, init = {}) {
   return res;
 }
 
-// Create or update Person by email
+// ---------- People ----------
 async function upsertPerson({ fullName, firstName, lastName, email }) {
-  // prefer upsert by email
   const payload = {
     data: {
       attributes: {
-        // Many workspaces want name.full_name; include both for broader compatibility
         name: { full_name: fullName || [firstName, lastName].filter(Boolean).join(' ') },
         email_addresses: email ? [{ email_address: email }] : [],
       }
     }
   };
 
-  // Upsert-by-email (if supported); otherwise create fallback
-  // We try the generic create; if workspace needs upsert key we handle “already exists” by searching.
-  // 1) Try create
+  // Try to create
   let created = await attioFetch('/objects/people/records', {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -68,13 +61,12 @@ async function upsertPerson({ fullName, firstName, lastName, email }) {
     return json.data.id;
   }
 
-  // If creation failed (e.g., record exists or validation differences), fall back to: find by email, then update
   const detail = await created.text();
   console.log('[people create] non-200:', created.status, detail);
 
   if (!email) throw new Error('Person requires an email to upsert');
 
-  // Search by email
+  // Search by email then patch
   const search = await attioFetch(`/objects/people/records?query=${encodeURIComponent(email)}`);
   if (!search.ok) {
     const err = await search.text();
@@ -84,7 +76,6 @@ async function upsertPerson({ fullName, firstName, lastName, email }) {
   const foundId = found?.data?.[0]?.id;
   if (!foundId) throw new Error(`Person not found by email "${email}" and create failed`);
 
-  // Update the found record with provided name/emails
   const update = await attioFetch(`/objects/people/records/${foundId}`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
@@ -96,24 +87,21 @@ async function upsertPerson({ fullName, firstName, lastName, email }) {
   return foundId;
 }
 
-// Create or update Company by domain (if domain provided)
+// ---------- Companies ----------
 async function upsertCompany({ companyName, companyWebsite }) {
   const domain = normalizeDomain(companyWebsite);
   if (!domain && !companyName) return null;
 
-  // We’ll prefer domain upsert; many workspaces enrich companies by domain automatically.
   if (domain) {
     const payload = {
       data: {
         attributes: {
           domains: [{ domain }],
-          // name is optional if you want Attio enrichment to set it later
           ...(companyName ? { name: { full_name: companyName } } : {})
         }
       }
     };
 
-    // try create
     let created = await attioFetch('/objects/companies/records', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -125,7 +113,6 @@ async function upsertCompany({ companyName, companyWebsite }) {
     const detail = await created.text();
     console.log('[company create] non-200:', created.status, detail);
 
-    // fallback: search by domain then patch
     const search = await attioFetch(`/objects/companies/records?query=${encodeURIComponent(domain)}`);
     if (!search.ok) {
       const err = await search.text();
@@ -146,14 +133,8 @@ async function upsertCompany({ companyName, companyWebsite }) {
     return foundId;
   }
 
-  // No domain, fallback to a name-only create (best effort)
-  const payload = {
-    data: {
-      attributes: {
-        name: { full_name: companyName }
-      }
-    }
-  };
+  // name-only fallback
+  const payload = { data: { attributes: { name: { full_name: companyName } } } };
   const res = await attioFetch('/objects/companies/records', {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -167,26 +148,27 @@ async function upsertCompany({ companyName, companyWebsite }) {
   return json.data.id;
 }
 
-// Get the ID of the “Deal stage” option that matches INITIAL_STAGE_NAME
-async function getDealStageOptionIdByName(stageName) {
-  // List attributes for the Deals object, find the stage attribute & its options
+// ---------- Deals ----------
+async function listDealAttributes() {
   const attrsRes = await attioFetch('/objects/deals/attributes');
   if (!attrsRes.ok) {
     const err = await attrsRes.text();
     throw new Error(`[deals attributes] ${attrsRes.status} ${err}`);
   }
   const attrs = await attrsRes.json();
-  const stageAttr = attrs?.data?.find(a => (a.slug || '').includes('stage') || (a.name || '').toLowerCase().includes('stage'));
+  return attrs?.data || [];
+}
+
+async function getDealStageOptionIdByName(stageName, dealAttrs) {
+  const stageAttr =
+    dealAttrs.find(a => (a.slug || '').includes('stage')) ||
+    dealAttrs.find(a => (a.name || '').toLowerCase().includes('stage'));
   if (!stageAttr) {
-    console.log('[deals attributes] Could not find a stage attribute. Returning null.');
+    console.log('[deal stage] no stage attribute found');
     return null;
   }
 
-  // Some APIs return options embedded; others require a second call.
-  // First try embedded:
   let options = stageAttr?.options || stageAttr?.meta?.options || [];
-
-  // If no embedded options, try fetching via attribute id endpoint (best guess)
   if (!options?.length && stageAttr.id) {
     const optRes = await attioFetch(`/objects/deals/attributes/${stageAttr.id}`);
     if (optRes.ok) {
@@ -197,39 +179,83 @@ async function getDealStageOptionIdByName(stageName) {
 
   const match = options.find(o => (o.name || '').toLowerCase() === stageName.toLowerCase());
   if (!match) {
-    console.log('[deals stage] No option matched name:', stageName, 'Available:', options.map(o => o.name));
+    console.log('[deal stage] no match for', stageName, 'Available:', options.map(o => o.name));
     return null;
   }
-  // Try id first; some APIs also accept slug/value
   return match.id || match.value || match.slug || null;
 }
 
+function addBestGuessDefaultsForRequired(attrs, attributesOut) {
+  // If your workspace has required attributes (e.g., currency, value, source, close date),
+  // this tries to set reasonable placeholders so creation succeeds.
+  for (const a of attrs) {
+    const isRequired = a?.required === true || a?.meta?.required === true;
+    if (!isRequired) continue;
+
+    // If we already set it, skip
+    if (a.slug && attributesOut[a.slug] != null) continue;
+
+    const nameLC = (a.name || '').toLowerCase();
+    const slugLC = (a.slug || '').toLowerCase();
+
+    // Common patterns:
+    if (/currency/.test(slugLC) || /currency/.test(nameLC)) {
+      attributesOut[a.slug] = 'USD';
+      continue;
+    }
+    if (/value|amount|deal_value/.test(slugLC) || /value|amount/.test(nameLC)) {
+      // Some workspaces store number directly; others have { amount, currency } split across fields.
+      // We'll set a numeric 0 if the attribute looks numeric.
+      attributesOut[a.slug] = 0;
+      continue;
+    }
+    if (/close\s*date|expected\s*close/.test(nameLC)) {
+      attributesOut[a.slug] = new Date().toISOString();
+      continue;
+    }
+    if (/source/.test(slugLC) || /source/.test(nameLC)) {
+      attributesOut[a.slug] = 'Inbound';
+      continue;
+    }
+    if (/owner/.test(slugLC) || /owner/.test(nameLC)) {
+      attributesOut[a.slug] = { target_object: 'users', target_record_id: DEAL_OWNER_USER_ID };
+      continue;
+    }
+
+    // As last resort, leave it unset but log it so we can add an exact mapping.
+    console.log('[deal required attr not set]', { id: a.id, slug: a.slug, name: a.name, type: a.type });
+  }
+}
+
 async function createDeal({ dealName, stageOptionId, personId, companyId }) {
-  // Build minimal but valid payload. Shape varies by workspace; we keep it conservative.
+  const dealAttrs = await listDealAttributes();
+
+  // Build attributes with what we know is safe
   const attributes = {
     name: { full_name: dealName },
   };
 
-  // Assign stage if we resolved one
-  if (stageOptionId) {
-    // Most workspaces accept “stage” (or “deal_stage”) as a select field with option id
-    attributes.deal_stage = { id: stageOptionId };
-  }
-
-  // Associate person (recommended: “associated_people” with target ids)
+  // associations
   if (personId) {
     attributes.associated_people = [{ target_object: 'people', target_record_id: personId }];
   }
-
-  // Associate company (best effort; some workspaces have “associated_companies”)
   if (companyId) {
     attributes.associated_companies = [{ target_object: 'companies', target_record_id: companyId }];
   }
 
-  // Optional: set owner to you
+  // stage
+  if (stageOptionId) {
+    // the slug in most workspaces is deal_stage (select)
+    attributes.deal_stage = { id: stageOptionId };
+  }
+
+  // owner
   if (DEAL_OWNER_USER_ID) {
     attributes.deal_owner = { target_object: 'users', target_record_id: DEAL_OWNER_USER_ID };
   }
+
+  // Add best-guess defaults for any required attributes we didn't set yet
+  addBestGuessDefaultsForRequired(dealAttrs, attributes);
 
   const payload = { data: { attributes } };
 
@@ -239,14 +265,27 @@ async function createDeal({ dealName, stageOptionId, personId, companyId }) {
   });
 
   if (!res.ok) {
-    const err = await res.text();
-    console.log('[attio deal create] non-200:', res.status, err);
-    // Helpful hint if a required field is missing:
-    if (res.status === 400 && err.includes('Required value for attribute')) {
-      console.log('Tip: Attio is telling us a Deal attribute is required by your workspace. ' +
-        'Open Attio → Objects → Deals → Attributes and either (a) make it optional, or ' +
-        '(b) tell me its slug and how to set it, and I’ll add it here.');
+    const errText = await res.text();
+    console.log('[attio deal create] non-200:', res.status, errText);
+
+    // If Attio tells us exactly which attribute ID is missing, look it up and log a friendly name
+    const m = errText.match(/attribute with ID "([0-9a-f-]+)"/i);
+    if (m) {
+      const attrId = m[1];
+      const attrRes = await attioFetch(`/objects/deals/attributes/${attrId}`);
+      if (attrRes.ok) {
+        const attrJson = await attrRes.json();
+        console.log('[deal required attr details]', {
+          id: attrId,
+          slug: attrJson?.data?.slug,
+          name: attrJson?.data?.name,
+          type: attrJson?.data?.type,
+        });
+      } else {
+        console.log('[deal required attr details] lookup failed', await attrRes.text());
+      }
     }
+
     throw new Error(`Deal create failed (${res.status})`);
   }
 
@@ -254,9 +293,9 @@ async function createDeal({ dealName, stageOptionId, personId, companyId }) {
   return json.data.id;
 }
 
-export default async function handler(req, res) {
+// ---------- handler ----------
+module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
-    // Visiting in a browser should show 405 (expected).
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
@@ -264,8 +303,7 @@ export default async function handler(req, res) {
     const payload = req.body || {};
     const fields = payload.data?.fields || [];
 
-    // ---- Read fields from your Tally test form ----
-    // Labels must match your form exactly.
+    // Read from Tally (labels must match)
     const fullNameRaw = pickByLabel(fields, 'Full Name');
     const emailRaw = pickByLabel(fields, 'Email Address') || pickByLabel(fields, 'Work Email');
     const companyNameRaw = pickByLabel(fields, 'Company Name');
@@ -276,7 +314,7 @@ export default async function handler(req, res) {
     const companyName = ensureString(companyNameRaw);
     const companyWebsite = ensureString(companyWebsiteRaw);
 
-    // Split name (helps workspaces that track first/last under name)
+    // Split name (helpful for some workspaces)
     let firstName = '';
     let lastName = '';
     if (fullName) {
@@ -285,43 +323,27 @@ export default async function handler(req, res) {
       lastName = parts.slice(1).join(' ') || '';
     }
 
-    // --- Create/Upsert Person ---
-    const personId = await upsertPerson({
-      fullName,
-      firstName,
-      lastName,
-      email,
-    });
+    // 1) person
+    const personId = await upsertPerson({ fullName, firstName, lastName, email });
     console.log('[person] id:', personId);
 
-    // --- Create/Upsert Company (best effort, by domain) ---
-    const companyId = await upsertCompany({
-      companyName,
-      companyWebsite,
-    });
+    // 2) company
+    const companyId = await upsertCompany({ companyName, companyWebsite });
     console.log('[company] id:', companyId);
 
-    // --- Resolve Deal stage option id by name (Prospect) ---
-    const stageOptionId = await getDealStageOptionIdByName(INITIAL_STAGE_NAME);
+    // 3) deal stage
+    const dealAttrs = await listDealAttributes();
+    const stageOptionId = await getDealStageOptionIdByName(INITIAL_STAGE_NAME, dealAttrs);
     console.log('[deal stage option id] =>', stageOptionId, `(for "${INITIAL_STAGE_NAME}")`);
 
-    // --- Create Deal ---
+    // 4) deal
     const dealName = `Inbound · ${fullName || email}${companyName ? ` @ ${companyName}` : ''}`;
-    const dealId = await createDeal({
-      dealName,
-      stageOptionId,
-      personId,
-      companyId,
-    });
+    const dealId = await createDeal({ dealName, stageOptionId, personId, companyId });
     console.log('[deal] id:', dealId);
 
-    return res.status(200).json({
-      ok: true,
-      created: { personId, companyId, dealId },
-    });
-
+    return res.status(200).json({ ok: true, created: { personId, companyId, dealId } });
   } catch (e) {
     console.error('[webhook] uncaught:', e);
     return res.status(500).json({ error: 'Internal Server Error' });
   }
-}
+};
