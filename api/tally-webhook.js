@@ -1,5 +1,5 @@
 // api/tally-webhook.js
-// Robust flow: Upsert Company -> Upsert-or-Create Person -> Create Deal (prefer record_ids)
+// Robust: Upsert Company -> Upsert-or-Create Person (multi-shape fallbacks) -> Create Deal (link by IDs)
 
 function pickField(fields, label) {
   return fields.find(f => (f.label || '').toLowerCase() === label.toLowerCase())?.value || '';
@@ -53,6 +53,20 @@ function getId(payload) {
   return null;
 }
 
+async function tryPersonWrite({ method, authHeaders, url, valuesVariants, logPrefix }) {
+  for (const values of valuesVariants) {
+    const resp = await fetch(url, {
+      method,
+      headers: authHeaders,
+      body: JSON.stringify({ data: { values } }),
+    });
+    const { raw, json } = await readBody(resp);
+    console.log(`${logPrefix}`, resp.status, raw);
+    if (resp.ok) return { id: getId(json), ok: true, raw };
+  }
+  return { ok: false };
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
@@ -63,7 +77,7 @@ export default async function handler(req, res) {
 
     const fields = req.body?.data?.fields || [];
 
-    // Your Tally labels
+    // Tally labels (as in your form)
     const fullName       = pickField(fields, 'Full Name').trim();
     const companyName    = pickField(fields, 'Company Name').trim();
     const companyWebsite = pickField(fields, 'Company Website').trim();
@@ -82,7 +96,7 @@ export default async function handler(req, res) {
       'Content-Type': 'application/json',
     };
 
-    // 1) Upsert Company -> companyId
+    // 1) Upsert Company
     let companyId = null;
     if (domain) {
       const displayName = companyName || companyNameFromDomain(domain);
@@ -96,50 +110,46 @@ export default async function handler(req, res) {
       if (cResp.ok) companyId = getId(cJson);
     }
 
-    // 2) Upsert-or-Create Person -> personId
+    // 2) Upsert-or-Create Person — try multiple accepted shapes
     let personId = null;
 
-    // UPSERT by email (no "type" field)
-    const pUpsert = await fetch(
-      'https://api.attio.com/v2/objects/people/records?matching_attribute=email_addresses',
-      { method: 'PUT', headers: authHeaders,
-        body: JSON.stringify({
-          data: {
-            values: {
-              email_addresses: [{ email_address: email }],
-              name: [{ first_name: firstName, last_name: lastName }],
-            },
-          },
-        }) }
-    );
-    const { raw: pUpsertRaw, json: pUpsertJson } = await readBody(pUpsert);
-    console.log('[attio people upsert]', pUpsert.status, pUpsertRaw);
+    // Try UPSERT by email (several shapes)
+    const upsertUrl = 'https://api.attio.com/v2/objects/people/records?matching_attribute=email_addresses';
+    const baseName  = [{ first_name: firstName, last_name: lastName }];
+    const emailVariants = [
+      { email_addresses: [{ email_address: email }], name: baseName }, // we expect this to work
+      { email_addresses: [{ email: email }],        name: baseName }, // alt
+      { email_addresses: [email],                    name: baseName }, // alt
+      { emails: [{ email }],                         name: baseName }, // alt
+      { emails: [email],                              name: baseName }, // alt
+    ];
 
-    if (pUpsert.ok) {
-      personId = getId(pUpsertJson);
-    } else {
-      // Fallback: CREATE (no "type")
-      const pCreate = await fetch(
-        'https://api.attio.com/v2/objects/people/records',
-        { method: 'POST', headers: authHeaders,
-          body: JSON.stringify({
-            data: {
-              values: {
-                email_addresses: [{ email_address: email }],
-                name: [{ first_name: firstName, last_name: lastName }],
-              },
-            },
-          }) }
-      );
-      const { raw: pCreateRaw, json: pCreateJson } = await readBody(pCreate);
-      console.log('[attio people create fallback]', pCreate.status, pCreateRaw);
-      if (!pCreate.ok) {
-        return res.status(502).json({ error: 'Attio people error', detail: pUpsertRaw || pCreateRaw });
-      }
-      personId = getId(pCreateJson);
+    let r = await tryPersonWrite({
+      method: 'PUT',
+      authHeaders,
+      url: upsertUrl,
+      valuesVariants: emailVariants,
+      logPrefix: '[attio people upsert]',
+    });
+
+    // If upsert didn’t work, try CREATE (several shapes)
+    if (!r.ok) {
+      const createUrl = 'https://api.attio.com/v2/objects/people/records';
+      r = await tryPersonWrite({
+        method: 'POST',
+        authHeaders,
+        url: createUrl,
+        valuesVariants: emailVariants,
+      logPrefix: '[attio people create fallback]',
+      });
     }
 
-    // 3) Create Deal (use IDs when possible)
+    if (!r.ok) {
+      return res.status(502).json({ error: 'Attio people error (all variants failed)' });
+    }
+    personId = r.id || null;
+
+    // 3) Create Deal (prefer linking by IDs)
     const displayCompany = domain ? (companyName || companyNameFromDomain(domain)) : '';
     const dealName = `Inbound — ${fullName || email}${displayCompany ? ' @ ' + displayCompany : ''}`;
 
@@ -163,6 +173,7 @@ export default async function handler(req, res) {
     console.log('[attio deal create]', dResp.status, dRaw);
     if (!dResp.ok) return res.status(502).json({ error: 'Attio deal error', detail: dRaw });
 
+    console.log('[webhook] success');
     return res.status(200).json({ ok: true, personId, companyId, dealId: getId(dJson) });
   } catch (e) {
     console.error('[webhook] uncaught', e);
