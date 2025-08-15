@@ -184,6 +184,22 @@ const createDeal = async (personRecord, companyRecord) => {
  * The main handler for the Vercel Serverless Function.
  */
 module.exports = async (req, res) => {
+    // --- Start of Enhanced Debugging ---
+    console.log('--- TALLY WEBHOOK INVOCATION START ---');
+    console.log(`Request received at: ${new Date().toISOString()}`);
+    console.log(`Request Method: ${req.method}`);
+    
+    // Log the raw body to see exactly what Tally is sending
+    console.log('Raw Request Body:', JSON.stringify(req.body, null, 2));
+
+    // Verify that environment variables are loaded
+    console.log('Checking Environment Variables...');
+    if (!ATTIO_TOKEN) console.error('CRITICAL: ATTIO_TOKEN is not set!');
+    if (!ATTIO_INITIAL_STAGE_ID) console.error('CRITICAL: ATTIO_INITIAL_STAGE_ID is not set!');
+    if (!ATTIO_OWNER_ID) console.error('CRITICAL: ATTIO_OWNER_ID is not set!');
+    console.log('Environment variable check complete.');
+    // --- End of Enhanced Debugging ---
+
     // Only allow POST requests
     if (req.method !== 'POST') {
         res.setHeader('Allow', 'POST');
@@ -191,8 +207,13 @@ module.exports = async (req, res) => {
     }
 
     try {
-        console.log('Received Tally webhook.');
         const payload = req.body;
+
+        // Add a check to ensure payload and its nested properties exist
+        if (!payload || !payload.data || !payload.data.fields) {
+            console.error('Invalid or empty payload received from Tally.');
+            return res.status(400).json({ status: 'error', message: 'Payload is missing or malformed.' });
+        }
         const fields = payload.data.fields;
 
         // --- Helper function to find a field by its label ---
@@ -238,6 +259,7 @@ module.exports = async (req, res) => {
 
     } catch (error) {
         console.error('Webhook processing failed:', error);
-        res.status(500).json({ status: 'error', message: 'An internal error occurred.' });
+        // Send back the error message in the response for easier debugging
+        res.status(500).json({ status: 'error', message: 'An internal error occurred.', details: error.message });
     }
 };
