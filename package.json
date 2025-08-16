@@ -1,0 +1,9 @@
+{
+  "name": "tally-attio-webhook",
+  "version": "1.0.0",
+  "description": "Webhook to connect Tally and Attio.",
+  "main": "api/tally-webhook.js",
+  "dependencies": {
+    "node-fetch": "^2.6.7"
+  }
+}
