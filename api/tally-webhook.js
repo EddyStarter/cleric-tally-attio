@@ -240,8 +240,10 @@ module.exports = async (req, res) => {
         const firstName = nameParts.shift() || 'N/A';
         const lastName = nameParts.join(' ') || 'N/A';
         
-        // Extract domain from URL
-        const domain = new URL(companyWebsite).hostname.replace('www.', '');
+        // --- FIX: Ensure the URL is valid before parsing ---
+        // This new line handles cases where 'https://' is missing from the website URL.
+        const fullUrl = companyWebsite.startsWith('http') ? companyWebsite : `https://${companyWebsite}`;
+        const domain = new URL(fullUrl).hostname.replace('www.', '');
 
         // --- Attio Workflow ---
         // 1. Find or create the Person
