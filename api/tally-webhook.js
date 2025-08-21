@@ -138,7 +138,8 @@ const createDeal = async (personRecord, companyRecord) => {
     const dealPayload = {
         data: {
             values: {
-                // --- Standard System Attributes ---
+                // --- Standard System Attributes (Final Corrected Version) ---
+                // These are the only required fields based on your screenshot.
                 'name': [{ value: dealName }],
                 'deal-stage': [{
                     target_record_id: ATTIO_INITIAL_STAGE_ID,
@@ -146,10 +147,6 @@ const createDeal = async (personRecord, companyRecord) => {
                 'assigned': [{
                     target_record_id: ATTIO_OWNER_ID,
                 }],
-
-                // --- Required Custom Attributes (Final Corrected Version) ---
-                // This now ONLY includes the "Deal Value" field, which is the only remaining required field.
-                'db653424-896b-4b1c-b46c-4999a75f624a': [{ currency: "USD", amount: 0 }], // Deal Value (Correct ID)
 
                 // --- Associations ---
                 'companies': [{
