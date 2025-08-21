@@ -143,10 +143,10 @@ const createDeal = async (personRecord, companyRecord) => {
             values: {
                 // --- Standard System Attributes (Using correct slugs from your UI and error logs) ---
                 'name': [{ value: dealName }],
-                'stage': [{ // Corrected slug based on your error log
+                'deal-stage': [{ // Corrected slug based on the definitive error log
                     target_record_id: ATTIO_INITIAL_STAGE_ID,
                 }],
-                'owner': [{ // Corrected slug based on your UI
+                'owner': [{ // Using slug from your UI
                     target_record_id: ATTIO_OWNER_ID,
                 }],
 
