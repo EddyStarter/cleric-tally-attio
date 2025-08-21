@@ -147,10 +147,9 @@ const createDeal = async (personRecord, companyRecord) => {
                     target_record_id: ATTIO_OWNER_ID,
                 }],
 
-                // --- Required Custom Attributes (Corrected Mapping) ---
+                // --- Required Custom Attributes (Final Corrected Version) ---
+                // This now ONLY includes the "Deal Value" field, which is the only remaining required field.
                 'db653424-896b-4b1c-b46c-4999a75f624a': [{ currency: "USD", amount: 0 }], // Deal Value (Correct ID)
-                'e222e29e-a386-496f-94ac-e15e2f5bd99a': [{ value: new Date().toISOString().split('T')[0] }], // Close Date
-                '6fd89118-1810-4e70-bd09-ee9c019f7f2c': [{ value: new Date().toISOString().split('T')[0] }], // Demo Date
 
                 // --- Associations ---
                 'companies': [{
