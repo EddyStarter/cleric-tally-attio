@@ -38,8 +38,12 @@ const attioApiRequest = async (endpoint, method, body = null) => {
     const response = await fetch(`${ATTIO_API_BASE}${endpoint}`, options);
 
     if (!response.ok) {
-        const errorBody = await response.text();
-        console.error(`Attio API Error (${response.status}):`, errorBody);
+        // --- TROUBLESHOOTING STEP ---
+        // This will log the EXACT error message from Attio's servers.
+        const errorBody = await response.json();
+        console.error('--- ATTIO API ERROR RESPONSE ---');
+        console.error(JSON.stringify(errorBody, null, 2));
+        console.error('--------------------------------');
         throw new Error(`Failed Attio API request to ${endpoint} with status ${response.status}`);
     }
 
