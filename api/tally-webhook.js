@@ -138,7 +138,7 @@ const createDeal = async (personRecord, companyRecord) => {
     const dealPayload = {
         data: {
             values: {
-                // --- Standard System Attributes (Corrected from Attio API Docs) ---
+                // --- Standard System Attributes ---
                 'name': [{ value: dealName }],
                 'deal-stage': [{
                     target_record_id: ATTIO_INITIAL_STAGE_ID,
@@ -147,12 +147,12 @@ const createDeal = async (personRecord, companyRecord) => {
                     target_record_id: ATTIO_OWNER_ID,
                 }],
 
-                // --- Required Custom Attributes (Using your provided IDs) ---
-                'fe9e8b49-1413-4520-83be-eb27482f2eb3': [{ currency: "USD", amount: 0 }], // Deal Value (expects currency)
-                'e222e29e-a386-496f-94ac-e15e2f5bd99a': [{ value: new Date().toISOString().split('T')[0] }], // Close Date (expects date)
-                '6fd89118-1810-4e70-bd09-ee9c019f7f2c': [{ value: new Date().toISOString().split('T')[0] }], // Demo Date (expects date)
+                // --- Required Custom Attributes (Corrected Mapping) ---
+                'db653424-896b-4b1c-b46c-4999a75f624a': [{ currency: "USD", amount: 0 }], // Deal Value (Correct ID)
+                'e222e29e-a386-496f-94ac-e15e2f5bd99a': [{ value: new Date().toISOString().split('T')[0] }], // Close Date
+                '6fd89118-1810-4e70-bd09-ee9c019f7f2c': [{ value: new Date().toISOString().split('T')[0] }], // Demo Date
 
-                // --- Associations (Corrected from Attio API Docs) ---
+                // --- Associations ---
                 'companies': [{
                     target_record_id: companyRecord.id,
                 }],
