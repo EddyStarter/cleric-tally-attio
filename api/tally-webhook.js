@@ -223,3 +223,4 @@ module.exports = async (req, res) => {
         res.status(500).json({ status: 'error', message: 'An internal error occurred.', details: error.message });
     }
 };
+
