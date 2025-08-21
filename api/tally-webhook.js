@@ -139,14 +139,13 @@ const findOrCreateCompany = async (companyName, companyDomain) => {
  */
 const createDeal = async (personRecord, companyRecord) => {
     console.log('Creating a new deal.');
-    const dealName = `New Prospect - ${companyRecord.values.name[0].value}`;
+    const dealNameValue = `New Prospect - ${companyRecord.values.name[0].value}`;
 
     const dealPayload = {
         data: {
             values: {
-                // --- Standard Attributes ---
-                // These use special system-wide IDs
-                'name': [{ value: dealName }],
+                // --- Standard System Attributes (Corrected based on Attio Docs) ---
+                'name': [{ value: dealNameValue }], // System attribute for the deal's name
                 'deal-stage': [{
                     target_record_id: ATTIO_INITIAL_STAGE_ID,
                 }],
@@ -154,13 +153,13 @@ const createDeal = async (personRecord, companyRecord) => {
                     target_record_id: ATTIO_OWNER_ID,
                 }],
                 
-                // --- FIX: Add required custom attributes with their specific API IDs ---
-                // The IDs you provided are for your custom attributes.
-                'e222e29e-a386-496f-94ac-e15e2f5bd99a': [{ currency: "USD", amount: 0 }], // Deal Value
-                'fe9e8b49-1413-4520-83be-eb27482f2eb3': [{ value: new Date().toISOString().split('T')[0] }], // Close Date
-                '6fd89118-1810-4e70-bd09-ee9c019f7f2c': [{ value: new Date().toISOString().split('T')[0] }], // Demo Date
+                // --- Required Custom Attributes ---
+                // Using the specific API IDs you provided for your custom fields.
+                'e222e29e-a386-496f-94ac-e15e2f5bd99a': [{ currency: "USD", amount: 0 }], // Your "Deal Value"
+                'fe9e8b49-1413-4520-83be-eb27482f2eb3': [{ value: new Date().toISOString().split('T')[0] }], // Your "Close Date"
+                '6fd89118-1810-4e70-bd09-ee9c019f7f2c': [{ value: new Date().toISOString().split('T')[0] }], // Your "Demo Date"
 
-                // --- Associations ---
+                // --- Associations (Corrected based on Attio Docs) ---
                 'companies': [{
                     target_record_id: companyRecord.id,
                 }],
