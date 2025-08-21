@@ -150,7 +150,7 @@ const createDeal = async (personRecord, companyRecord) => {
                     target_record_id: ATTIO_OWNER_ID,
                 }],
 
-                // --- Associations (Corrected based on previous error logs) ---
+                // --- Associations (Corrected based on the definitive error log) ---
                 'associated_company': [{
                     target_record_id: companyRecord.id,
                 }],
@@ -223,4 +223,3 @@ module.exports = async (req, res) => {
         res.status(500).json({ status: 'error', message: 'An internal error occurred.', details: error.message });
     }
 };
-
