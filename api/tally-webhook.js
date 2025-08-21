@@ -55,16 +55,13 @@ const attioApiRequest = async (endpoint, method, body = null) => {
  */
 const findOrCreatePerson = async (email, firstName, lastName) => {
     console.log(`Searching for person with email: ${email}`);
-    // First, try to find an existing person by their email address to avoid duplicates.
     const queryResponse = await attioApiRequest('/objects/people/records/query', 'POST', {
         query: {
-            and: [
-                {
-                    attribute: 'email_addresses',
-                    condition: 'contains',
-                    value: email,
-                },
-            ],
+            and: [{
+                attribute: 'email_addresses',
+                condition: 'contains',
+                value: email,
+            }, ],
         },
     });
 
@@ -74,7 +71,6 @@ const findOrCreatePerson = async (email, firstName, lastName) => {
         return existingPerson;
     }
 
-    // If no person is found, create a new one.
     console.log('No existing person found. Creating a new one.');
     const createResponse = await attioApiRequest('/objects/people/records', 'POST', {
         data: {
@@ -99,7 +95,6 @@ const findOrCreatePerson = async (email, firstName, lastName) => {
  */
 const findOrCreateCompany = async (companyName, companyDomain) => {
     console.log(`Searching for company with domain: ${companyDomain}`);
-    // First, try to find an existing company by domain to avoid duplicates.
     const queryResponse = await attioApiRequest('/objects/companies/records/query', 'POST', {
         query: {
             and: [{
@@ -116,7 +111,6 @@ const findOrCreateCompany = async (companyName, companyDomain) => {
         return existingCompany;
     }
 
-    // If no company is found, create a new one.
     console.log('No existing company found. Creating a new one.');
     const createResponse = await attioApiRequest('/objects/companies/records', 'POST', {
         data: {
@@ -139,31 +133,31 @@ const findOrCreateCompany = async (companyName, companyDomain) => {
  */
 const createDeal = async (personRecord, companyRecord) => {
     console.log('Creating a new deal.');
-    const dealNameValue = `New Prospect - ${companyRecord.values.name[0].value}`;
+    const dealName = `New Prospect - ${companyRecord.values.name[0].value}`;
 
     const dealPayload = {
         data: {
             values: {
-                // --- Standard System Attributes (Corrected based on Attio Docs) ---
-                'name': [{ value: dealNameValue }], // System attribute for the deal's name
-                'deal-stage': [{
+                // --- Standard Attributes (Corrected) ---
+                'deal_name': [{ value: dealName }],
+                'deal_stage': [{
                     target_record_id: ATTIO_INITIAL_STAGE_ID,
                 }],
-                'assigned': [{
+                'owner': [{
                     target_record_id: ATTIO_OWNER_ID,
                 }],
-                
-                // --- Required Custom Attributes ---
-                // Using the specific API IDs you provided for your custom fields.
-                'e222e29e-a386-496f-94ac-e15e2f5bd99a': [{ currency: "USD", amount: 0 }], // Your "Deal Value"
-                'fe9e8b49-1413-4520-83be-eb27482f2eb3': [{ value: new Date().toISOString().split('T')[0] }], // Your "Close Date"
-                '6fd89118-1810-4e70-bd09-ee9c019f7f2c': [{ value: new Date().toISOString().split('T')[0] }], // Your "Demo Date"
 
-                // --- Associations (Corrected based on Attio Docs) ---
-                'companies': [{
+                // --- Required Custom Attributes (Using your provided IDs) ---
+                // NOTE: Assuming the IDs you provided map to your required custom fields.
+                'fe9e8b49-1413-4520-83be-eb27482f2eb3': [{ currency: "USD", amount: 0 }], // Assumed to be "Deal Value"
+                'e222e29e-a386-496f-94ac-e15e2f5bd99a': [{ value: new Date().toISOString().split('T')[0] }], // Assumed to be "Close Date"
+                '6fd89118-1810-4e70-bd09-ee9c019f7f2c': [{ value: new Date().toISOString().split('T')[0] }], // Assumed to be "Demo Date"
+
+                // --- Associations ---
+                'associated_company': [{
                     target_record_id: companyRecord.id,
                 }],
-                'people': [{
+                'associated_people': [{
                     target_record_id: personRecord.id,
                 }],
             },
@@ -212,11 +206,11 @@ module.exports = async (req, res) => {
             console.error('Missing required fields from Tally payload:', { fullName, email, companyName, companyWebsite });
             return res.status(400).json({ status: 'error', message: 'Missing required form fields.' });
         }
-        
+
         const nameParts = fullName.split(' ');
         const firstName = nameParts.shift() || 'N/A';
         const lastName = nameParts.join(' ') || 'N/A';
-        
+
         const fullUrl = companyWebsite.startsWith('http') ? companyWebsite : `https://${companyWebsite}`;
         const domain = new URL(fullUrl).hostname.replace('www.', '');
 
