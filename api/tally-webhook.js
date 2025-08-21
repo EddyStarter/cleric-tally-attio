@@ -141,8 +141,7 @@ const createDeal = async (personRecord, companyRecord) => {
     const dealPayload = {
         data: {
             values: {
-                // --- Standard System Attributes (Using correct slugs) ---
-                // These are the only required fields based on your screenshot.
+                // --- Standard System Attributes ---
                 'name': [{ value: dealName }],
                 'deal-stage': [{
                     target_record_id: ATTIO_INITIAL_STAGE_ID,
@@ -151,11 +150,11 @@ const createDeal = async (personRecord, companyRecord) => {
                     target_record_id: ATTIO_OWNER_ID,
                 }],
 
-                // --- Associations ---
-                'companies': [{
+                // --- Associations (Corrected Slugs) ---
+                'associated_company': [{
                     target_record_id: companyRecord.id,
                 }],
-                'people': [{
+                'associated_people': [{
                     target_record_id: personRecord.id,
                 }],
             },
