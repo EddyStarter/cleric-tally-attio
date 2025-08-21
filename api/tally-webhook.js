@@ -147,11 +147,10 @@ const createDeal = async (personRecord, companyRecord) => {
                     target_record_id: ATTIO_OWNER_ID,
                 }],
 
-                // --- Required Custom Attributes (Using your provided IDs) ---
-                // NOTE: Assuming the IDs you provided map to your required custom fields.
-                'fe9e8b49-1413-4520-83be-eb27482f2eb3': [{ currency: "USD", amount: 0 }], // Assumed to be "Deal Value"
-                'e222e29e-a386-496f-94ac-e15e2f5bd99a': [{ value: new Date().toISOString().split('T')[0] }], // Assumed to be "Close Date"
-                '6fd89118-1810-4e70-bd09-ee9c019f7f2c': [{ value: new Date().toISOString().split('T')[0] }], // Assumed to be "Demo Date"
+                // --- Required Custom Attributes (Corrected Mapping) ---
+                'fe9e8b49-1413-4520-83be-eb27482f2eb3': [{ currency: "USD", amount: 0 }], // Deal Value (expects currency)
+                'e222e29e-a386-496f-94ac-e15e2f5bd99a': [{ value: new Date().toISOString().split('T')[0] }], // Close Date (expects date)
+                '6fd89118-1810-4e70-bd09-ee9c019f7f2c': [{ value: new Date().toISOString().split('T')[0] }], // Demo Date (expects date)
 
                 // --- Associations ---
                 'associated_company': [{
