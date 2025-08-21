@@ -83,7 +83,6 @@ const findOrCreatePerson = async (email, firstName, lastName) => {
                 'last_name': [{ value: lastName }],
                 'email_addresses': [{
                     email_address: email,
-                    // Note: The 'type' key was removed as per your findings.
                 }],
             },
         },
@@ -153,23 +152,20 @@ const createDeal = async (personRecord, companyRecord) => {
                 'owner': [{
                     target_record_id: ATTIO_OWNER_ID,
                 }],
+                
+                // --- FIX: Add required custom attributes with default values ---
+                // Note: The attribute IDs ('deal_value', 'close_date', 'demo_date') must match the IDs in your Attio workspace.
+                'deal_value': [{ currency: "USD", amount: 0 }], // Default value of $0
+                'close_date': [{ value: new Date().toISOString().split('T')[0] }], // Default to today's date
+                'demo_date': [{ value: new Date().toISOString().split('T')[0] }], // Default to today's date
 
                 // --- Associations ---
-                // Link the deal to the company record.
                 'associated_company': [{
                     target_record_id: companyRecord.id,
                 }],
-                // Link the deal to the person record.
                 'associated_people': [{
                     target_record_id: personRecord.id,
                 }],
-
-                // --- Optional / Custom Attributes ---
-                // Add any other required custom attributes for your deals here.
-                // Example for a "Source" select attribute:
-                // 'source': [{ option: "Website" }],
-                // Example for a "Value" currency attribute:
-                // 'value': [{ currency: "USD", amount: 10000 }],
             },
         },
     };
@@ -184,23 +180,10 @@ const createDeal = async (personRecord, companyRecord) => {
  * The main handler for the Vercel Serverless Function.
  */
 module.exports = async (req, res) => {
-    // --- Start of Enhanced Debugging ---
     console.log('--- TALLY WEBHOOK INVOCATION START ---');
     console.log(`Request received at: ${new Date().toISOString()}`);
-    console.log(`Request Method: ${req.method}`);
-    
-    // Log the raw body to see exactly what Tally is sending
     console.log('Raw Request Body:', JSON.stringify(req.body, null, 2));
 
-    // Verify that environment variables are loaded
-    console.log('Checking Environment Variables...');
-    if (!ATTIO_TOKEN) console.error('CRITICAL: ATTIO_TOKEN is not set!');
-    if (!ATTIO_INITIAL_STAGE_ID) console.error('CRITICAL: ATTIO_INITIAL_STAGE_ID is not set!');
-    if (!ATTIO_OWNER_ID) console.error('CRITICAL: ATTIO_OWNER_ID is not set!');
-    console.log('Environment variable check complete.');
-    // --- End of Enhanced Debugging ---
-
-    // Only allow POST requests
     if (req.method !== 'POST') {
         res.setHeader('Allow', 'POST');
         return res.status(405).end('Method Not Allowed');
@@ -209,59 +192,43 @@ module.exports = async (req, res) => {
     try {
         const payload = req.body;
 
-        // Add a check to ensure payload and its nested properties exist
         if (!payload || !payload.data || !payload.data.fields) {
             console.error('Invalid or empty payload received from Tally.');
             return res.status(400).json({ status: 'error', message: 'Payload is missing or malformed.' });
         }
         const fields = payload.data.fields;
 
-        // --- Helper function to find a field by its label ---
         const getFieldValue = (label) => {
             const field = fields.find((f) => f.label === label);
             return field ? field.value : null;
         };
 
-        // --- Extract data from Tally form fields ---
-        // IMPORTANT: These labels must exactly match the labels in your Tally form.
         const fullName = getFieldValue('Full Name');
         const email = getFieldValue('Email Address');
         const companyName = getFieldValue('Company Name');
         const companyWebsite = getFieldValue('Company Website');
 
-        // Basic validation
         if (!fullName || !email || !companyName || !companyWebsite) {
             console.error('Missing required fields from Tally payload:', { fullName, email, companyName, companyWebsite });
             return res.status(400).json({ status: 'error', message: 'Missing required form fields.' });
         }
         
-        // --- Process Data ---
         const nameParts = fullName.split(' ');
         const firstName = nameParts.shift() || 'N/A';
         const lastName = nameParts.join(' ') || 'N/A';
         
-        // --- FIX: Ensure the URL is valid before parsing ---
-        // This new line handles cases where 'https://' is missing from the website URL.
         const fullUrl = companyWebsite.startsWith('http') ? companyWebsite : `https://${companyWebsite}`;
         const domain = new URL(fullUrl).hostname.replace('www.', '');
 
-        // --- Attio Workflow ---
-        // 1. Find or create the Person
         const personRecord = await findOrCreatePerson(email, firstName, lastName);
-
-        // 2. Find or create the Company
         const companyRecord = await findOrCreateCompany(companyName, domain);
-
-        // 3. Create the Deal and link it
         await createDeal(personRecord, companyRecord);
 
-        // --- Success Response ---
         console.log('Workflow completed successfully.');
         res.status(200).json({ status: 'success', message: 'Person, Company, and Deal processed in Attio.' });
 
     } catch (error) {
         console.error('Webhook processing failed:', error);
-        // Send back the error message in the response for easier debugging
         res.status(500).json({ status: 'error', message: 'An internal error occurred.', details: error.message });
     }
 };
