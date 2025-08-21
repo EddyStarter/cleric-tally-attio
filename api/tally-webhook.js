@@ -141,20 +141,20 @@ const createDeal = async (personRecord, companyRecord) => {
     const dealPayload = {
         data: {
             values: {
-                // --- Standard System Attributes (Using correct slugs from your UI) ---
+                // --- Standard System Attributes ---
                 'name': [{ value: dealName }],
-                'stage': [{ // Corrected slug
+                'deal-stage': [{
                     target_record_id: ATTIO_INITIAL_STAGE_ID,
                 }],
-                'owner': [{ // Corrected slug
+                'assigned': [{
                     target_record_id: ATTIO_OWNER_ID,
                 }],
 
-                // --- Associations ---
-                'companies': [{
+                // --- Associations (Corrected Slugs based on error log) ---
+                'associated_company': [{
                     target_record_id: companyRecord.id,
                 }],
-                'people': [{
+                'associated_people': [{
                     target_record_id: personRecord.id,
                 }],
             },
