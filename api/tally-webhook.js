@@ -144,26 +144,27 @@ const createDeal = async (personRecord, companyRecord) => {
     const dealPayload = {
         data: {
             values: {
-                // --- Standard & Required Attributes ---
-                'deal_name': [{ value: dealName }],
-                'deal_stage': [{
+                // --- Standard Attributes ---
+                // These use special system-wide IDs
+                'name': [{ value: dealName }],
+                'deal-stage': [{
                     target_record_id: ATTIO_INITIAL_STAGE_ID,
                 }],
-                'owner': [{
+                'assigned': [{
                     target_record_id: ATTIO_OWNER_ID,
                 }],
                 
-                // --- FIX: Add required custom attributes with default values ---
-                // Note: The attribute IDs ('deal_value', 'close_date', 'demo_date') must match the IDs in your Attio workspace.
-                'deal_value': [{ currency: "USD", amount: 0 }], // Default value of $0
-                'close_date': [{ value: new Date().toISOString().split('T')[0] }], // Default to today's date
-                'demo_date': [{ value: new Date().toISOString().split('T')[0] }], // Default to today's date
+                // --- FIX: Add required custom attributes with their specific API IDs ---
+                // The IDs you provided are for your custom attributes.
+                'e222e29e-a386-496f-94ac-e15e2f5bd99a': [{ currency: "USD", amount: 0 }], // Deal Value
+                'fe9e8b49-1413-4520-83be-eb27482f2eb3': [{ value: new Date().toISOString().split('T')[0] }], // Close Date
+                '6fd89118-1810-4e70-bd09-ee9c019f7f2c': [{ value: new Date().toISOString().split('T')[0] }], // Demo Date
 
                 // --- Associations ---
-                'associated_company': [{
+                'companies': [{
                     target_record_id: companyRecord.id,
                 }],
-                'associated_people': [{
+                'people': [{
                     target_record_id: personRecord.id,
                 }],
             },
