@@ -38,8 +38,11 @@ const attioApiRequest = async (endpoint, method, body = null) => {
     const response = await fetch(`${ATTIO_API_BASE}${endpoint}`, options);
 
     if (!response.ok) {
-        const errorBody = await response.text();
-        console.error(`Attio API Error (${response.status}):`, errorBody);
+        // This will log the EXACT error message from Attio's servers for debugging.
+        const errorBody = await response.json();
+        console.error('--- ATTIO API ERROR RESPONSE ---');
+        console.error(JSON.stringify(errorBody, null, 2));
+        console.error('--------------------------------');
         throw new Error(`Failed Attio API request to ${endpoint} with status ${response.status}`);
     }
 
@@ -138,7 +141,8 @@ const createDeal = async (personRecord, companyRecord) => {
     const dealPayload = {
         data: {
             values: {
-                // --- Standard System Attributes ---
+                // --- Standard System Attributes (Using correct slugs) ---
+                // These are the only required fields based on your screenshot.
                 'name': [{ value: dealName }],
                 'deal-stage': [{
                     target_record_id: ATTIO_INITIAL_STAGE_ID,
@@ -146,10 +150,6 @@ const createDeal = async (personRecord, companyRecord) => {
                 'assigned': [{
                     target_record_id: ATTIO_OWNER_ID,
                 }],
-
-                // --- Required Custom Attributes (Final Corrected Version) ---
-                // This now ONLY includes the "Deal Value" field, which is the only remaining required field.
-                'db653424-896b-4b1c-b46c-4999a75f624a': [{ currency: "USD", amount: 0 }], // Deal Value (Correct ID)
 
                 // --- Associations ---
                 'companies': [{
