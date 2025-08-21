@@ -38,7 +38,8 @@ const attioApiRequest = async (endpoint, method, body = null) => {
     const response = await fetch(`${ATTIO_API_BASE}${endpoint}`, options);
 
     if (!response.ok) {
-        // This will log the EXACT error message from Attio's servers for debugging.
+        // --- ENHANCED TROUBLESHOOTING STEP ---
+        // This will log the EXACT error message from Attio's servers.
         const errorBody = await response.json();
         console.error('--- ATTIO API ERROR RESPONSE ---');
         console.error(JSON.stringify(errorBody, null, 2));
@@ -141,12 +142,12 @@ const createDeal = async (personRecord, companyRecord) => {
     const dealPayload = {
         data: {
             values: {
-                // --- Standard System Attributes (Using correct slugs from your screenshot) ---
+                // --- Standard System Attributes (Using slugs from UI as requested) ---
                 'name': [{ value: dealName }], // Slug for "Deal name"
-                'deal-stage': [{ // Slug for "Deal stage"
+                'stage': [{ // Slug for "Deal stage"
                     target_record_id: ATTIO_INITIAL_STAGE_ID,
                 }],
-                'assigned': [{ // Slug for "Owner"
+                'owner': [{ // Slug for "Owner"
                     target_record_id: ATTIO_OWNER_ID,
                 }],
 
