@@ -109,4 +109,97 @@ async function createDeal(personRecord, companyRecord, externalId) {
   const companyName =
     companyRecord?.values?.name?.[0]?.value ||
     companyRecord?.values?.name?.[0] ||
-    'Unknown Com
+    'Unknown Company';
+
+  const dealName = `New Prospect - ${companyName}`;
+
+  // Stage must be a STRING title
+  const values = {
+    name: [{ value: dealName }],
+    stage: ATTIO_INITIAL_STAGE_TITLE,
+    associated_company: [{ target_record_id: companyRecord.id }],
+    associated_people: [{ target_record_id: personRecord.id }],
+  };
+
+  // Owner: prefer email string; only if not set, omit (to avoid 400)
+  if (ATTIO_OWNER_EMAIL) {
+    values.owner = ATTIO_OWNER_EMAIL; // write by email (string)
+  }
+  // If you truly need ID-based owner later, switch to values.owner = [{ target_record_id: ATTIO_OWNER_ID }];
+
+  if (externalId) {
+    values.external_source_id = [{ value: externalId }];
+  }
+
+  const created = await attioApiRequest('/objects/deals/records', 'POST', { data: { values } });
+  console.log(`Created deal: ${created.data.id?.id || created.data.id}`);
+  return created.data;
+}
+
+// ---------- MAIN HANDLER ----------
+module.exports = async (req, res) => {
+  console.log('--- TALLY WEBHOOK INVOCATION START ---');
+  console.log(`Request received at: ${new Date().toISOString()}`);
+
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    return res.status(405).end('Method Not Allowed');
+  }
+
+  try {
+    const payload = req.body;
+    console.log('Raw Request Body:', JSON.stringify(payload || {}, null, 2));
+
+    if (!payload || !payload.data || !payload.data.fields) {
+      console.error('Invalid or empty payload received from Tally.');
+      return res.status(400).json({ status: 'error', message: 'Payload is missing or malformed.' });
+    }
+
+    const fields = payload.data.fields;
+    const getField = (label) => (fields.find(f => f.label === label) || {}).value || null;
+
+    const fullName = getField('Full Name') || '';
+    const email = getField('Email Address');
+    const companyName = getField('Company Name');
+    const companyWebsite = getField('Company Website');
+
+    if (!email || !companyName || !companyWebsite) {
+      console.error('Missing required fields:', { email, companyName, companyWebsite });
+      return res.status(400).json({ status: 'error', message: 'Missing required form fields.' });
+    }
+
+    // Split name (no "N/A" placeholders)
+    const parts = fullName.trim().split(/\s+/).filter(Boolean);
+    const firstName = parts[0] || '';
+    const lastName = parts.slice(1).join(' ') || '';
+
+    // Normalize the company domain
+    const fullUrl = companyWebsite.startsWith('http') ? companyWebsite : `https://${companyWebsite}`;
+    const domain = new URL(fullUrl).hostname.replace(/^www\./i, '');
+
+    // Upsert person/company via "query then create"
+    const person = await findOrCreatePerson(email, firstName, lastName);
+    const company = await findOrCreateCompany(companyName, domain);
+
+    // Prefer responseId; fall back to submissionId if present
+    const externalId = payload?.data?.responseId || payload?.data?.submissionId || null;
+
+    await createDeal(person, company, externalId);
+
+    console.log('Workflow completed successfully.');
+    return res.status(200).json({ status: 'success', message: 'Person, Company, and Deal processed in Attio.' });
+  } catch (err) {
+    console.error('Webhook processing failed:', err);
+
+    // If you pass ?debug=1, include full Attio error JSON in the response
+    const debug = (req.query && (req.query.debug === '1' || req.query.debug === 'true'));
+    const response = {
+      status: 'error',
+      message: 'An internal error occurred.',
+      details: String(err.message),
+    };
+    if (debug && err && err.details) response.attio_error = err.details;
+
+    return res.status(500).json(response);
+  }
+};
