@@ -3,14 +3,11 @@
 
 const fetch = require('node-fetch');
 
-// ---------- ENV VARS (Vercel -> Project -> Settings -> Environment Variables) ----------
+// ---------- ENV VARS ----------
 const ATTIO_TOKEN = process.env.ATTIO_TOKEN;                        // Attio API token
-const ATTIO_INITIAL_STAGE_ID = process.env.ATTIO_INITIAL_STAGE_ID;  // (optional) UUID of your "Prospect" stage
 const ATTIO_OWNER_ID = process.env.ATTIO_OWNER_ID;                  // UUID of the user who should own the deal
-
-// Optional convenience: if you prefer a title instead of a stage ID, set this env var.
-// e.g. ATTIO_INITIAL_STAGE_TITLE=Prospect
-const ATTIO_INITIAL_STAGE_TITLE = process.env.ATTIO_INITIAL_STAGE_TITLE || null;
+// Use the stage TITLE (e.g., "Prospect"). If not set, default to "Prospect".
+const ATTIO_INITIAL_STAGE_TITLE = process.env.ATTIO_INITIAL_STAGE_TITLE || "Prospect";
 
 const ATTIO_API_BASE = 'https://api.attio.com/v2';
 
@@ -107,9 +104,7 @@ async function createDeal(personRecord, companyRecord, externalId) {
   // 1) If we have an external ID, check if a Deal already exists.
   if (externalId) {
     const existing = await attioApiRequest('/objects/deals/records/query', 'POST', {
-      query: {
-        and: [{ attribute: 'external_source_id', condition: 'is', value: externalId }],
-      },
+      query: { and: [{ attribute: 'external_source_id', condition: 'is', value: externalId }] },
     });
     if (existing?.data?.length) {
       console.log('Deal already exists for this externalId. Returning existing record.');
@@ -125,17 +120,17 @@ async function createDeal(personRecord, companyRecord, externalId) {
 
   const dealName = `New Prospect - ${companyName}`;
 
-  // Prefer stage by ID if provided; otherwise write by title value
-  const stageValue = ATTIO_INITIAL_STAGE_ID
-    ? [{ target_record_id: ATTIO_INITIAL_STAGE_ID }]
-    : [{ value: (ATTIO_INITIAL_STAGE_TITLE || 'Prospect') }];
-
   const payload = {
     data: {
       values: {
         name: [{ value: dealName }],
-        stage: stageValue, // IMPORTANT: standard deal status attribute is "stage"
+
+        // ✅ Stage must be a STRING title (e.g., "Prospect"), not an object
+        stage: ATTIO_INITIAL_STAGE_TITLE,
+
+        // Owner: keep using ID (works in most workspaces). If you prefer, set owner by email string.
         owner: [{ target_record_id: ATTIO_OWNER_ID }],
+
         associated_company: [{ target_record_id: companyRecord.id }],
         associated_people: [{ target_record_id: personRecord.id }],
       },
