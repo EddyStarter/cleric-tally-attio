@@ -3,14 +3,18 @@
 
 const fetch = require('node-fetch');
 
-// ---- Environment variables (set in Vercel -> Project -> Settings -> Environment Variables)
-const ATTIO_TOKEN = process.env.ATTIO_TOKEN;                      // Attio API token
-const ATTIO_INITIAL_STAGE_ID = process.env.ATTIO_INITIAL_STAGE_ID; // UUID for your "Prospect" (initial) stage
-const ATTIO_OWNER_ID = process.env.ATTIO_OWNER_ID;                // UUID of the user who should own the deal
+// ---------- ENV VARS (Vercel -> Project -> Settings -> Environment Variables) ----------
+const ATTIO_TOKEN = process.env.ATTIO_TOKEN;                        // Attio API token
+const ATTIO_INITIAL_STAGE_ID = process.env.ATTIO_INITIAL_STAGE_ID;  // (optional) UUID of your "Prospect" stage
+const ATTIO_OWNER_ID = process.env.ATTIO_OWNER_ID;                  // UUID of the user who should own the deal
+
+// Optional convenience: if you prefer a title instead of a stage ID, set this env var.
+// e.g. ATTIO_INITIAL_STAGE_TITLE=Prospect
+const ATTIO_INITIAL_STAGE_TITLE = process.env.ATTIO_INITIAL_STAGE_TITLE || null;
 
 const ATTIO_API_BASE = 'https://api.attio.com/v2';
 
-// ---- Helper to call Attio API with clear error logs
+// ---------- LOW-LEVEL ATTIO CALLER (returns full Attio error when debug=1) ----------
 async function attioApiRequest(endpoint, method, body = null) {
   const res = await fetch(`${ATTIO_API_BASE}${endpoint}`, {
     method,
@@ -22,25 +26,25 @@ async function attioApiRequest(endpoint, method, body = null) {
   });
 
   if (!res.ok) {
-    let err = null;
-    try { err = await res.json(); } catch {}
+    let errBody = null;
+    try { errBody = await res.json(); } catch {}
     console.error('--- ATTIO API ERROR RESPONSE ---');
-    console.error(JSON.stringify(err || {}, null, 2));
+    console.error(JSON.stringify(errBody || {}, null, 2));
     console.error('--------------------------------');
-    throw new Error(`Attio ${endpoint} failed with status ${res.status}`);
+    const e = new Error(`Attio ${endpoint} failed with status ${res.status}`);
+    e.details = errBody; // attach Attio’s JSON for debugging
+    throw e;
   }
   return res.json();
 }
 
-// ---- People: find by email or create
+// ---------- PEOPLE: find by email or create ----------
 async function findOrCreatePerson(email, firstName, lastName) {
   console.log(`Searching for person with email: ${email}`);
 
   const query = await attioApiRequest('/objects/people/records/query', 'POST', {
     query: {
-      and: [
-        { attribute: 'email_addresses', condition: 'contains', value: email },
-      ],
+      and: [{ attribute: 'email_addresses', condition: 'contains', value: email }],
     },
   });
 
@@ -51,9 +55,7 @@ async function findOrCreatePerson(email, firstName, lastName) {
   }
 
   console.log('No existing person found. Creating a new one.');
-  const values = {
-    email_addresses: [{ email_address: email }],
-  };
+  const values = { email_addresses: [{ email_address: email }] };
   if (firstName) values.first_name = [{ value: firstName }];
   if (lastName) values.last_name = [{ value: lastName }];
 
@@ -64,15 +66,13 @@ async function findOrCreatePerson(email, firstName, lastName) {
   return created.data;
 }
 
-// ---- Companies: find by domain or create
+// ---------- COMPANIES: find by domain or create ----------
 async function findOrCreateCompany(companyName, companyDomain) {
   console.log(`Searching for company with domain: ${companyDomain}`);
 
   const query = await attioApiRequest('/objects/companies/records/query', 'POST', {
     query: {
-      and: [
-        { attribute: 'domains', condition: 'is', value: companyDomain },
-      ],
+      and: [{ attribute: 'domains', condition: 'is', value: companyDomain }],
     },
   });
 
@@ -82,7 +82,7 @@ async function findOrCreateCompany(companyName, companyDomain) {
     return existing;
   }
 
-  console.log('No existing company found. Creating a new one.');
+  console.log('No existing company found. Creating a new company.');
   const created = await attioApiRequest('/objects/companies/records', 'POST', {
     data: {
       values: {
@@ -95,7 +95,7 @@ async function findOrCreateCompany(companyName, companyDomain) {
   return created.data;
 }
 
-// ---- Deals: create once, skip duplicates using your unique attribute "external_source_id"
+// ---------- DEALS: create once, skip duplicates via unique attribute "external_source_id" ----------
 /**
  * @param {object} personRecord
  * @param {object} companyRecord
@@ -108,9 +108,7 @@ async function createDeal(personRecord, companyRecord, externalId) {
   if (externalId) {
     const existing = await attioApiRequest('/objects/deals/records/query', 'POST', {
       query: {
-        and: [
-          { attribute: 'external_source_id', condition: 'is', value: externalId },
-        ],
+        and: [{ attribute: 'external_source_id', condition: 'is', value: externalId }],
       },
     });
     if (existing?.data?.length) {
@@ -127,26 +125,19 @@ async function createDeal(personRecord, companyRecord, externalId) {
 
   const dealName = `New Prospect - ${companyName}`;
 
+  // Prefer stage by ID if provided; otherwise write by title value
+  const stageValue = ATTIO_INITIAL_STAGE_ID
+    ? [{ target_record_id: ATTIO_INITIAL_STAGE_ID }]
+    : [{ value: (ATTIO_INITIAL_STAGE_TITLE || 'Prospect') }];
+
   const payload = {
     data: {
       values: {
         name: [{ value: dealName }],
-
-        // IMPORTANT: Attio’s status attribute on deals is "stage" (not "deal-stage")
-        stage: [
-          { target_record_id: ATTIO_INITIAL_STAGE_ID },
-        ],
-
-        owner: [
-          { target_record_id: ATTIO_OWNER_ID },
-        ],
-
-        associated_company: [
-          { target_record_id: companyRecord.id },
-        ],
-        associated_people: [
-          { target_record_id: personRecord.id },
-        ],
+        stage: stageValue, // IMPORTANT: standard deal status attribute is "stage"
+        owner: [{ target_record_id: ATTIO_OWNER_ID }],
+        associated_company: [{ target_record_id: companyRecord.id }],
+        associated_people: [{ target_record_id: personRecord.id }],
       },
     },
   };
@@ -160,7 +151,7 @@ async function createDeal(personRecord, companyRecord, externalId) {
   return created.data;
 }
 
-// ---- Main Vercel handler
+// ---------- MAIN HANDLER ----------
 module.exports = async (req, res) => {
   console.log('--- TALLY WEBHOOK INVOCATION START ---');
   console.log(`Request received at: ${new Date().toISOString()}`);
@@ -214,6 +205,16 @@ module.exports = async (req, res) => {
     return res.status(200).json({ status: 'success', message: 'Person, Company, and Deal processed in Attio.' });
   } catch (err) {
     console.error('Webhook processing failed:', err);
-    return res.status(500).json({ status: 'error', message: 'An internal error occurred.', details: err.message });
+
+    // If you pass ?debug=1, include full Attio error JSON in the response
+    const debug = (req.query && (req.query.debug === '1' || req.query.debug === 'true'));
+    const response = {
+      status: 'error',
+      message: 'An internal error occurred.',
+      details: String(err.message),
+    };
+    if (debug && err && err.details) response.attio_error = err.details;
+
+    return res.status(500).json(response);
   }
 };
