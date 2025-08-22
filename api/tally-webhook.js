@@ -1,5 +1,4 @@
 // /api/tally-webhook.js
-// /api/tally-webhook.js
 // Vercel Serverless Function (Node.js 18+, CommonJS). Uses built-in fetch.
 
 const ATTIO_TOKEN = process.env.ATTIO_TOKEN;                         // REQUIRED
@@ -13,7 +12,7 @@ async function safeJson(res) {
   try { return await res.json(); } catch { return null; }
 }
 
-// ---- Low-level Attio caller (propagates error JSON; never throws unhandled)
+// ---- Low-level Attio caller
 async function attioApiRequest(endpoint, method, body = null) {
   const res = await fetch(`${ATTIO_API_BASE}${endpoint}`, {
     method,
@@ -62,8 +61,7 @@ async function assertPersonByEmail(email, firstName, lastName) {
 async function assertCompanyByDomain(companyName, domain) {
   const values = {
     name: [{ value: companyName }],
-    // domains can be passed as plain strings; Attio normalizes
-    domains: [domain],
+    domains: [{ domain }], // explicit object form
   };
   const resp = await attioApiRequest(
     "/objects/companies/records?matching_attribute=domains",
@@ -77,26 +75,25 @@ async function assertCompanyByDomain(companyName, domain) {
 async function assertDealByExternalId({ externalId, dealName, stageTitle, ownerEmail, personEmail, companyDomain }) {
   const values = {
     name: [{ value: dealName }],
-    stage: stageTitle, // write stage as STRING
-    // Associate by natural keys (no IDs)
+    stage: stageTitle, // stage as STRING
+    // Associate PERSON by natural key (email)
     associated_people: [
       {
         target_object: "people",
         email_addresses: [{ email_address: personEmail }],
       }
     ],
-    associated_company: {
-      target_object: "companies",
-      // domains may be array of strings or objects; send string for simplicity
-      domains: [companyDomain],
-    },
+    // ✅ Associate COMPANY as an ARRAY, with domains as OBJECTS, and explicit target_object
+    associated_company: [
+      {
+        target_object: "companies",
+        domains: [{ domain: companyDomain }],
+      }
+    ],
     external_source_id: [{ value: externalId }],
   };
 
-  if (ownerEmail) {
-    // owner as plain email string
-    values.owner = ownerEmail;
-  }
+  if (ownerEmail) values.owner = ownerEmail; // owner as email string
 
   const resp = await attioApiRequest(
     "/objects/deals/records?matching_attribute=external_source_id",
@@ -171,7 +168,6 @@ module.exports = async (req, res) => {
     console.log("Upserted deal:", deal?.id);
     return res.status(200).json({ status: "success", message: "Person, Company, and Deal processed in Attio." });
   } catch (err) {
-    // Never crash the function: always return JSON, include Attio error when debug=1
     console.error("Webhook processing failed:", err);
     const debug = (req.query && (req.query.debug === "1" || req.query.debug === "true"));
     const body = {
