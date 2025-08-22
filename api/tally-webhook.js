@@ -4,14 +4,13 @@
 const fetch = require('node-fetch');
 
 // ---------- ENV VARS ----------
-const ATTIO_TOKEN = process.env.ATTIO_TOKEN;                        // Attio API token
-const ATTIO_OWNER_EMAIL = process.env.ATTIO_OWNER_EMAIL || null;    // Preferred: owner by email (string)
-const ATTIO_OWNER_ID = process.env.ATTIO_OWNER_ID || null;          // Fallback: owner by ID (not used unless needed)
-const ATTIO_INITIAL_STAGE_TITLE = process.env.ATTIO_INITIAL_STAGE_TITLE || "Prospect"; // Stage title
+const ATTIO_TOKEN = process.env.ATTIO_TOKEN;                               // REQUIRED: Attio API token
+const ATTIO_OWNER_EMAIL = process.env.ATTIO_OWNER_EMAIL || null;           // RECOMMENDED: owner as email (string)
+const ATTIO_INITIAL_STAGE_TITLE = process.env.ATTIO_INITIAL_STAGE_TITLE || "Prospect"; // Stage title (string)
 
 const ATTIO_API_BASE = 'https://api.attio.com/v2';
 
-// ---------- LOW-LEVEL ATTIO CALLER (returns full Attio error when debug=1) ----------
+// ---------- HTTP helper (includes debug error body) ----------
 async function attioApiRequest(endpoint, method, body = null) {
   const res = await fetch(`${ATTIO_API_BASE}${endpoint}`, {
     method,
@@ -35,105 +34,77 @@ async function attioApiRequest(endpoint, method, body = null) {
   return res.json();
 }
 
-// ---------- PEOPLE: find by email or create ----------
-async function findOrCreatePerson(email, firstName, lastName) {
-  console.log(`Searching for person with email: ${email}`);
-
-  const query = await attioApiRequest('/objects/people/records/query', 'POST', {
-    query: {
-      and: [{ attribute: 'email_addresses', condition: 'contains', value: email }],
-    },
-  });
-
-  if (query?.data?.length) {
-    const existing = query.data[0];
-    console.log(`Found existing person: ${existing.id?.id || existing.id || '[no-id]'}`);
-    return existing;
-  }
-
-  console.log('No existing person found. Creating a new one.');
-  const values = { email_addresses: [{ email_address: email }] };
-  if (firstName) values.first_name = [{ value: firstName }];
-  if (lastName) values.last_name = [{ value: lastName }];
-
-  const created = await attioApiRequest('/objects/people/records', 'POST', {
-    data: { values },
-  });
-  console.log(`Created person: ${created.data.id?.id || created.data.id}`);
-  return created.data;
-}
-
-// ---------- COMPANIES: find by domain or create ----------
-async function findOrCreateCompany(companyName, companyDomain) {
-  console.log(`Searching for company with domain: ${companyDomain}`);
-
-  const query = await attioApiRequest('/objects/companies/records/query', 'POST', {
-    query: { and: [{ attribute: 'domains', condition: 'is', value: companyDomain }] },
-  });
-
-  if (query?.data?.length) {
-    const existing = query.data[0];
-    console.log(`Found existing company: ${existing.id?.id || existing.id || '[no-id]'}`);
-    return existing;
-  }
-
-  console.log('No existing company found. Creating a new company.');
-  const created = await attioApiRequest('/objects/companies/records', 'POST', {
-    data: { values: { name: [{ value: companyName }], domains: [{ value: companyDomain }] } },
-  });
-  console.log(`Created company: ${created.data.id?.id || created.data.id}`);
-  return created.data;
-}
-
-// ---------- DEALS: create once, skip duplicates via unique attribute "external_source_id" ----------
-/**
- * @param {object} personRecord
- * @param {object} companyRecord
- * @param {string|null} externalId - Tally responseId/submissionId (stable per submission)
- */
-async function createDeal(personRecord, companyRecord, externalId) {
-  console.log('Creating (or skipping) deal. externalId =', externalId || '(none)');
-
-  // 1) If we have an external ID, check if a Deal already exists.
-  if (externalId) {
-    const existing = await attioApiRequest('/objects/deals/records/query', 'POST', {
-      query: { and: [{ attribute: 'external_source_id', condition: 'is', value: externalId }] },
-    });
-    if (existing?.data?.length) {
-      console.log('Deal already exists for this externalId. Returning existing record.');
-      return existing.data[0];
-    }
-  }
-
-  // 2) Build the create payload
-  const companyName =
-    companyRecord?.values?.name?.[0]?.value ||
-    companyRecord?.values?.name?.[0] ||
-    'Unknown Company';
-
-  const dealName = `New Prospect - ${companyName}`;
-
-  // Stage must be a STRING title
+// ---------- ASSERT (UPSERT) HELPERS ----------
+// People: assert by email (no prior read)
+async function assertPersonByEmail(email, firstName, lastName) {
   const values = {
-    name: [{ value: dealName }],
-    stage: ATTIO_INITIAL_STAGE_TITLE,
-    associated_company: [{ target_record_id: companyRecord.id }],
-    associated_people: [{ target_record_id: personRecord.id }],
+    // Attio accepts email_addresses in object form
+    email_addresses: [{ email_address: email }],
+  };
+  // Optional name pieces if present
+  if (firstName || lastName) {
+    values.name = [{
+      full_name: [firstName, lastName].filter(Boolean).join(' '),
+      first_name: firstName || undefined,
+      last_name: lastName || undefined,
+    }];
+  }
+
+  const resp = await attioApiRequest(
+    '/objects/people/records?matching_attribute=email_addresses',
+    'PUT',
+    { data: { values } }
+  );
+  return resp.data;
+}
+
+// Companies: assert by domain (no prior read)
+async function assertCompanyByDomain(companyName, domain) {
+  const values = {
+    name: [{ value: companyName }],
+    // Attio tolerates domain-type writes as arrays of domain strings/objects
+    domains: [{ domain }],
   };
 
-  // Owner: prefer email string; only if not set, omit (to avoid 400)
-  if (ATTIO_OWNER_EMAIL) {
-    values.owner = ATTIO_OWNER_EMAIL; // write by email (string)
-  }
-  // If you truly need ID-based owner later, switch to values.owner = [{ target_record_id: ATTIO_OWNER_ID }];
+  const resp = await attioApiRequest(
+    '/objects/companies/records?matching_attribute=domains',
+    'PUT',
+    { data: { values } }
+  );
+  return resp.data;
+}
 
-  if (externalId) {
-    values.external_source_id = [{ value: externalId }];
-  }
+// Deals: assert by your unique "external_source_id"
+async function assertDealByExternalId({
+  externalId, dealName, stageTitle, ownerEmail, personEmail, companyDomain,
+}) {
+  // Build associations via natural keys (NOT IDs)
+  const values = {
+    name: [{ value: dealName }],
+    stage: stageTitle,                // write stage as a STRING title
+    associated_people: [
+      {
+        target_object: 'people',
+        email_addresses: [{ email_address: personEmail }],
+      },
+    ],
+    associated_company: {
+      target_object: 'companies',
+      domains: [{ domain: companyDomain }],
+    },
+    external_source_id: [{ value: externalId }],
+  };
 
-  const created = await attioApiRequest('/objects/deals/records', 'POST', { data: { values } });
-  console.log(`Created deal: ${created.data.id?.id || created.data.id}`);
-  return created.data;
+  // Owner as plain string email (omit if not provided)
+  if (ownerEmail) values.owner = ownerEmail;
+
+  // Assert (upsert) the deal by the unique attribute
+  const resp = await attioApiRequest(
+    '/objects/deals/records?matching_attribute=external_source_id',
+    'PUT',
+    { data: { values } }
+  );
+  return resp.data;
 }
 
 // ---------- MAIN HANDLER ----------
@@ -168,38 +139,14 @@ module.exports = async (req, res) => {
       return res.status(400).json({ status: 'error', message: 'Missing required form fields.' });
     }
 
-    // Split name (no "N/A" placeholders)
+    // Split name safely
     const parts = fullName.trim().split(/\s+/).filter(Boolean);
     const firstName = parts[0] || '';
     const lastName = parts.slice(1).join(' ') || '';
 
-    // Normalize the company domain
+    // Get clean domain
     const fullUrl = companyWebsite.startsWith('http') ? companyWebsite : `https://${companyWebsite}`;
     const domain = new URL(fullUrl).hostname.replace(/^www\./i, '');
 
-    // Upsert person/company via "query then create"
-    const person = await findOrCreatePerson(email, firstName, lastName);
-    const company = await findOrCreateCompany(companyName, domain);
-
-    // Prefer responseId; fall back to submissionId if present
-    const externalId = payload?.data?.responseId || payload?.data?.submissionId || null;
-
-    await createDeal(person, company, externalId);
-
-    console.log('Workflow completed successfully.');
-    return res.status(200).json({ status: 'success', message: 'Person, Company, and Deal processed in Attio.' });
-  } catch (err) {
-    console.error('Webhook processing failed:', err);
-
-    // If you pass ?debug=1, include full Attio error JSON in the response
-    const debug = (req.query && (req.query.debug === '1' || req.query.debug === 'true'));
-    const response = {
-      status: 'error',
-      message: 'An internal error occurred.',
-      details: String(err.message),
-    };
-    if (debug && err && err.details) response.attio_error = err.details;
-
-    return res.status(500).json(response);
-  }
-};
+    // Use Tally's IDs (consistent dedupe)
+    const externalId = payl
